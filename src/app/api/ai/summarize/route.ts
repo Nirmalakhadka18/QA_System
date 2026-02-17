@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
         let transcriptText = "";
 
-        // Strategy 1: Try Innertube (youtubei.js) - Robust & mimics client
+        // Strategy 1: Try Innertube (youtubei.js)
         try {
             console.log(`[Transcript] Attempting Innertube for ${videoId}...`);
             const { Innertube, UniversalCache } = await import('youtubei.js');
@@ -45,25 +45,47 @@ export async function POST(req: NextRequest) {
             console.warn("[Transcript] Innertube failed:", innertubeError.message);
         }
 
-        // Strategy 2: Try youtube-transcript (Scraping) if Innertube failed
+        // Strategy 2: Call internal Python Serverless Function (api/transcript.py)
         if (!transcriptText) {
             try {
-                console.log(`[Transcript] Attempting youtube-transcript fallback for ${videoId}...`);
-                const transcript = await YoutubeTranscript.fetchTranscript(videoId);
-                transcriptText = transcript.map(t => t.text).join(" ");
-                console.log(`[Transcript] youtube-transcript success. Length: ${transcriptText.length}`);
+                console.log(`[Transcript] Attempting Python fallback for ${videoId}...`);
+
+                // Construct absolute URL for internal call
+                // Vercel Headers usually contain the host
+                const protocol = req.headers.get("x-forwarded-proto") || "https";
+                const host = req.headers.get("host");
+                const baseUrl = `${protocol}://${host}`;
+                const pythonApiUrl = `${baseUrl}/api/transcript?videoId=${videoId}`;
+
+                console.log(`[Transcript] Fetching from: ${pythonApiUrl}`);
+                const pyResponse = await fetch(pythonApiUrl);
+                const pyData = await pyResponse.json();
+
+                if (pyResponse.ok && pyData.transcript) {
+                    transcriptText = pyData.transcript;
+                    console.log(`[Transcript] Python fallback success. Length: ${transcriptText.length}`);
+                } else {
+                    throw new Error(pyData.error || "Python endpoint returned error");
+                }
+
             } catch (fallbackError: any) {
-                console.error("[Transcript] All fetch methods failed.");
+                console.error("[Transcript] Python fallback failed:", fallbackError.message);
 
-                // Determine user-friendly error
-                const isRestricted = fallbackError.message?.includes("Sign in") || fallbackError.message?.includes("cookies");
-                const isNoCaptions = fallbackError.message?.includes("Transcripts are disabled") || fallbackError.message?.includes("No transcript found");
+                // Strategy 3: Last resort youtube-transcript (Node)
+                try {
+                    const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+                    transcriptText = transcript.map(t => t.text).join(" ");
+                    console.log(`[Transcript] Node fallback success.`);
+                } catch (nodeError: any) {
+                    console.error("[Transcript] All methods failed.");
 
-                const errorMessage = isNoCaptions
-                    ? "This video does not have captions/transcripts available. Please try a different video."
-                    : "Could not fetch transcript. The video might be age-restricted or private.";
+                    const isNoCaptions = nodeError.message?.includes("Transcripts are disabled") || nodeError.message?.includes("No transcript found");
+                    const errorMessage = isNoCaptions
+                        ? "This video does not have captions/transcripts available. Please try a different video."
+                        : "Could not fetch transcript. The video might be restricted.";
 
-                return NextResponse.json({ error: errorMessage }, { status: 404 });
+                    return NextResponse.json({ error: errorMessage }, { status: 404 });
+                }
             }
         }
 
