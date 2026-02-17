@@ -1,0 +1,8 @@
+{
+    "rewrites": [
+        {
+            "source": "/api/python/transcript",
+            "destination": "/api/index.py"
+        }
+    ]
+}

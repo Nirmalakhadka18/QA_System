@@ -11,22 +11,23 @@ class handler(BaseHTTPRequestHandler):
 
         if not video_id:
             self.send_response(400)
-            self.send_header('Content-type', 'application/json')
+            self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'error': 'Missing videoId'}).encode())
             return
 
         try:
+            # Explicitly call the correct method: YouTubeTranscriptApi.get_transcript
             transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
             full_text = " ".join([i['text'] for i in transcript_list])
             
             self.send_response(200)
-            self.send_header('Content-type', 'application/json')
+            self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'transcript': full_text}).encode())
             
         except Exception as e:
             self.send_response(500)
-            self.send_header('Content-type', 'application/json')
+            self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(json.dumps({'error': str(e)}).encode())
