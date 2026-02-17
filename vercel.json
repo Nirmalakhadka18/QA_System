@@ -2,7 +2,7 @@
     "rewrites": [
         {
             "source": "/api/python/transcript",
-            "destination": "/api/transcript_handler.py"
+            "destination": "/api/index.py"
         }
     ]
 }
