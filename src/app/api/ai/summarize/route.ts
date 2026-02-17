@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { YoutubeTranscript } from "youtube-transcript";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { spawn } from "child_process";
+
+// Force dynamic to prevent static generation issues
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: NextRequest) {
     try {
@@ -19,48 +21,50 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Invalid YouTube URL" }, { status: 400 });
         }
 
-        // Fetch Transcript via Python Script (more reliable)
         let transcriptText = "";
+
+        // Strategy 1: Try Innertube (youtubei.js) - Robust & mimics client
         try {
-            console.log(`Fetching transcript for videoId: ${videoId} using Python script...`);
+            console.log(`[Transcript] Attempting Innertube for ${videoId}...`);
+            const { Innertube, UniversalCache } = await import('youtubei.js');
+            const youtube = await Innertube.create({
+                cache: new UniversalCache(false),
+                generate_session_locally: true
+            });
 
-            const pythonProcess = spawn('python', ['scripts/get_transcript.py', videoId]);
+            const info = await youtube.getInfo(videoId);
+            const transcriptData = await info.getTranscript();
 
-            let scriptOutput = "";
-            let scriptError = "";
-
-            for await (const chunk of pythonProcess.stdout) {
-                scriptOutput += chunk.toString();
+            if (transcriptData?.transcript?.content?.body?.initial_segments) {
+                transcriptText = transcriptData.transcript.content.body.initial_segments
+                    .map((seg: any) => seg.snippet.text)
+                    .join(" ");
+                console.log(`[Transcript] Innertube success. Length: ${transcriptText.length}`);
             }
+        } catch (innertubeError: any) {
+            console.warn("[Transcript] Innertube failed:", innertubeError.message);
+        }
 
-            for await (const chunk of pythonProcess.stderr) {
-                scriptError += chunk.toString();
-            }
-
-            if (scriptError) {
-                console.warn("Python script stderr:", scriptError);
-            }
-
+        // Strategy 2: Try youtube-transcript (Scraping) if Innertube failed
+        if (!transcriptText) {
             try {
-                const result = JSON.parse(scriptOutput);
-                if (result.error) {
-                    throw new Error(result.error);
-                }
-                transcriptText = result.transcript;
-            } catch (e: any) {
-                console.error("Failed to parse Python script output:", scriptOutput);
-                throw new Error(e.message || "Failed to parse transcript data");
+                console.log(`[Transcript] Attempting youtube-transcript fallback for ${videoId}...`);
+                const transcript = await YoutubeTranscript.fetchTranscript(videoId);
+                transcriptText = transcript.map(t => t.text).join(" ");
+                console.log(`[Transcript] youtube-transcript success. Length: ${transcriptText.length}`);
+            } catch (fallbackError: any) {
+                console.error("[Transcript] All fetch methods failed.");
+
+                // Determine user-friendly error
+                const isRestricted = fallbackError.message?.includes("Sign in") || fallbackError.message?.includes("cookies");
+                const isNoCaptions = fallbackError.message?.includes("Transcripts are disabled") || fallbackError.message?.includes("No transcript found");
+
+                const errorMessage = isNoCaptions
+                    ? "This video does not have captions/transcripts available. Please try a different video."
+                    : "Could not fetch transcript. The video might be age-restricted or private.";
+
+                return NextResponse.json({ error: errorMessage }, { status: 404 });
             }
-
-            console.log(`Transcript fetched. Length: ${transcriptText.length} characters.`);
-
-        } catch (error: any) {
-            console.error("Transcript Error:", error);
-            const errorMessage = error.message?.includes("Transcripts are disabled") || error.message?.includes("No transcript found")
-                ? "This video does not have captions/transcripts available. Please try a video with closed captions."
-                : "Could not fetch transcript.";
-
-            return NextResponse.json({ error: errorMessage }, { status: 404 });
         }
 
         // Initialize Gemini
