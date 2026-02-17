@@ -45,7 +45,12 @@ export async function GET() {
         return NextResponse.json({
             status: "critical_error",
             error: error.message,
-            stack: error.stack
+            stack: error.stack,
+            diagnostics: {
+                hasEnvVar: !!process.env.DATABASE_URL,
+                envVarLength: process.env.DATABASE_URL ? process.env.DATABASE_URL.length : 0,
+                envVarPrefix: process.env.DATABASE_URL ? process.env.DATABASE_URL.substring(0, 20) + "..." : "MISSING"
+            }
         });
     }
 }
