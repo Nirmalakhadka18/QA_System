@@ -19,30 +19,30 @@ export const authOptions: NextAuthOptions = {
                     return null;
                 }
 
-                // Bypass check for admin user if DB is unreachable
-                if (credentials.email === "test@test.com" && credentials.password === "Test123@123") {
-                    console.log("Admin bypass triggered");
-                    return {
-                        id: "00000000-0000-0000-0000-000000000001",
-                        name: "Admin User",
-                        email: "test@test.com",
-                        role: "admin",
-                        status: "approved",
-                        createdAt: new Date(),
-                    };
-                }
+                // Bypass check - COMMENTED OUT TO PREVENT FOREIGN KEY ERRORS IN PRODUCTION
+                // if (credentials.email === "test@test.com" && credentials.password === "Test123@123") {
+                //     console.log("Admin bypass triggered");
+                //     return {
+                //         id: "00000000-0000-0000-0000-000000000001",
+                //         name: "Admin User",
+                //         email: "test@test.com",
+                //         role: "admin",
+                //         status: "approved",
+                //         createdAt: new Date(),
+                //     };
+                // }
 
-                // Bypass check for standard test user if DB is unreachable
-                if (credentials.email === "user@test.com" && credentials.password === "Test123@123") {
-                    return {
-                        id: "00000000-0000-0000-0000-000000000002",
-                        name: "Test User",
-                        email: "user@test.com",
-                        role: "user",
-                        status: "approved",
-                        createdAt: new Date(),
-                    };
-                }
+                // Bypass check for standard test user - COMMENTED OUT
+                // if (credentials.email === "user@test.com" && credentials.password === "Test123@123") {
+                //     return {
+                //         id: "00000000-0000-0000-0000-000000000002",
+                //         name: "Test User",
+                //         email: "user@test.com",
+                //         role: "user",
+                //         status: "approved",
+                //         createdAt: new Date(),
+                //     };
+                // }
 
                 const user = await db
                     .select()
