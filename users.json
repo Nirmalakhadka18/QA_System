@@ -1,0 +1,9 @@
+[
+  {
+    "id": "7cde8298-c8db-4eea-9263-32fedb1c9c0c",
+    "name": "Admin User",
+    "email": "test@test.com",
+    "role": "admin",
+    "status": "approved"
+  }
+]
