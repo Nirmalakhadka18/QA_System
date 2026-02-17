@@ -5,9 +5,9 @@ const dbUrl = (process.env.DATABASE_URL || "").trim().replace(/^["']|["']$/g, ""
 const url = new URL(dbUrl || "postgres://localhost/db");
 const originalHostname = url.hostname;
 
-if (originalHostname.includes("neon.tech")) {
-    url.hostname = "44.211.114.173"; // Bypass DNS
-}
+// if (originalHostname.includes("neon.tech")) {
+//     url.hostname = "44.211.114.173"; // Bypass DNS - REMOVED: Causing connection issues
+// }
 
 url.searchParams.delete("sslmode");
 url.searchParams.delete("channel_binding");
