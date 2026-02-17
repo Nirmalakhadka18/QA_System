@@ -4,6 +4,8 @@ import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import bcrypt from "bcrypt";
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
     try {
         const testEmail = "test@test.com"; // default admin email
