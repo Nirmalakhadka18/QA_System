@@ -2,7 +2,11 @@
     "rewrites": [
         {
             "source": "/api/python/transcript",
-            "destination": "/api/index.py"
+            "destination": "/api/transcript.py"
+        },
+        {
+            "source": "/api/auth/:path*",
+            "destination": "/api/auth/:path*"
         }
     ]
 }

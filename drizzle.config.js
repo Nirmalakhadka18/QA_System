@@ -1,4 +1,6 @@
-require("dotenv").config();
+const dotenv = require("dotenv");
+dotenv.config({ path: ".env" });
+dotenv.config({ path: ".env.local" });
 const { defineConfig } = require("drizzle-kit");
 
 if (!process.env.DATABASE_URL) {
@@ -10,6 +12,13 @@ module.exports = defineConfig({
     out: "./drizzle",
     dialect: "postgresql",
     dbCredentials: {
-        url: process.env.DATABASE_URL,
+        host: "54.86.249.90",
+        user: "neondb_owner",
+        password: process.env.DATABASE_URL.split(":")[2].split("@")[0], // Extract password from URL
+        database: "neondb",
+        ssl: {
+            rejectUnauthorized: false,
+            servername: "ep-red-unit-aiw0d3hl-pooler.c-4.us-east-1.aws.neon.tech",
+        },
     },
 });

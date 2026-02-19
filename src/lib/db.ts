@@ -1,9 +1,18 @@
-import { neon } from "@neondatabase/serverless";
-import { drizzle } from "drizzle-orm/neon-http";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
 
-// Use the HTTP driver for robust serverless connections (avoids TCP/SSL issues)
-const sql = neon(process.env.DATABASE_URL!);
-export const db = drizzle(sql);
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: {
+        rejectUnauthorized: false, // Required for Neon
+        // Optionally add servername if needed for certain Neon regions
+        servername: process.env.DATABASE_URL?.includes("neon.tech")
+            ? process.env.DATABASE_URL.split("@")[1].split("/")[0].split(":")[0]
+            : undefined,
+    },
+});
+
+export const db = drizzle(pool);
 
 // Export Pool as undefined/mock if needed, but grep showed no usage. 
 // If something breaks, we can add a compatibility layer.

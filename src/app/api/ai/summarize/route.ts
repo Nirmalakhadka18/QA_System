@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { YoutubeTranscript } from "youtube-transcript";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 // Force dynamic to prevent static generation issues
@@ -23,112 +22,143 @@ export async function POST(req: NextRequest) {
 
         let transcriptText = "";
 
-        // Strategy 1: Try Innertube (youtubei.js)
-        try {
-            console.log(`[Transcript] Attempting Innertube for ${videoId}...`);
-            const { Innertube, UniversalCache } = await import('youtubei.js');
-            const youtube = await Innertube.create({
-                cache: new UniversalCache(false),
-                generate_session_locally: true
-            });
-
-            const info = await youtube.getInfo(videoId);
-            const transcriptData = await info.getTranscript();
-
-            if (transcriptData?.transcript?.content?.body?.initial_segments) {
-                transcriptText = transcriptData.transcript.content.body.initial_segments
-                    .map((seg: any) => seg.snippet.text)
-                    .join(" ");
-                console.log(`[Transcript] Innertube success. Length: ${transcriptText.length}`);
-            }
-        } catch (innertubeError: any) {
-            console.warn("[Transcript] Innertube failed:", innertubeError.message);
-        }
-
-        // Strategy 2: Call internal Python Serverless Function (api/index.py) - Vercel Production
+        // Strategy 1: Multi-Client Innertube (Resilient)
         if (!transcriptText) {
-            try {
-                console.log(`[Transcript] Attempting Python Serverless Function for ${videoId}...`);
-
-                const protocol = req.headers.get("x-forwarded-proto") || "https";
-                const host = req.headers.get("host"); // includes port locally
-                const baseUrl = `${protocol}://${host}`;
-                // Map to api/index.py via rewrite or direct call
-                const pythonApiUrl = `${baseUrl}/api/python/transcript?videoId=${videoId}`;
-
-                console.log(`[Transcript] Fetching from: ${pythonApiUrl}`);
-                const pyResponse = await fetch(pythonApiUrl);
-                const pyData = await pyResponse.json();
-
-                if (pyResponse.ok && pyData.transcript) {
-                    transcriptText = pyData.transcript;
-                    console.log(`[Transcript] Python Function success. Length: ${transcriptText.length}`);
-                }
-            } catch (serverlessError: any) {
-                console.warn("[Transcript] Python Function failed:", serverlessError.message);
-            }
-        }
-
-        // Strategy 3: Local Python Script Spawn (Development environment support)
-        if (!transcriptText) {
-            try {
-                console.log(`[Transcript] Attempting Local Python Script for ${videoId}...`);
-                const { spawn } = require('child_process');
-                const path = require('path');
-
-                // Use absolute path for reliability
-                const scriptPath = path.join(process.cwd(), 'src/scripts/get_transcript.py');
-
-                const pythonProcess = spawn('python', [scriptPath, videoId]);
-
-                let scriptOutput = "";
-                let scriptError = "";
-
-                for await (const chunk of pythonProcess.stdout) {
-                    scriptOutput += chunk.toString();
-                }
-
-                for await (const chunk of pythonProcess.stderr) {
-                    scriptError += chunk.toString();
-                }
-
-                if (scriptError) console.warn("Local Python stderr:", scriptError);
-
+            const clients: any[] = ["ANDROID", "MWEB", "YTMUSIC", "WEB"];
+            for (const clientType of clients) {
                 try {
-                    const result = JSON.parse(scriptOutput);
-                    if (result.transcript) {
-                        transcriptText = result.transcript;
-                        console.log(`[Transcript] Local Script success. Length: ${transcriptText.length}`);
-                    }
-                } catch (e) {
-                    // Ignore parsing errors, move to next strategy
-                }
+                    console.log(`[Transcript] Strategy 1: Innertube (${clientType}) for ${videoId}`);
+                    const { Innertube, UniversalCache } = await import('youtubei.js');
+                    const youtube = await Innertube.create({
+                        client_type: clientType,
+                        generate_session_locally: true
+                    });
 
-            } catch (spawnError: any) {
-                console.warn("[Transcript] Local Script failed:", spawnError.message);
+                    const info = await youtube.getInfo(videoId);
+
+                    // Try direct getTranscript()
+                    try {
+                        const transcriptData = await info.getTranscript();
+                        if (transcriptData?.transcript?.content?.body?.initial_segments) {
+                            transcriptText = transcriptData.transcript.content.body.initial_segments
+                                .map((seg: any) => seg.snippet.text)
+                                .join(" ");
+                            console.log(`[Transcript] Success with client ${clientType}. Length: ${transcriptText.length}`);
+                            break;
+                        }
+                    } catch (innerError) {
+                        console.warn(`[Transcript] getTranscript failed for ${clientType}, trying manual track extraction`);
+                    }
+
+                    // Try manual extraction from player_response (captions block)
+                    const tracks = (info as any).player_response?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+                    if (tracks && tracks.length > 0) {
+                        const enTrack = tracks.find((t: any) => t.languageCode === 'en' || t.vssId?.includes('en')) || tracks[0];
+                        const trackUrl = enTrack.baseUrl + (enTrack.baseUrl.includes('?') ? '&' : '?') + 'fmt=srv1';
+                        const transcriptRes = await fetch(trackUrl);
+                        const xml = await transcriptRes.text();
+                        const segments = xml.match(/<text\s+[^>]*>([^<]*)<\/text>/g) || [];
+                        transcriptText = segments
+                            .map(s => s.replace(/<text\s+[^>]*>/, '').replace('</text>', ''))
+                            .map(s => s.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"'))
+                            .join(' ');
+
+                        if (transcriptText.length > 100) {
+                            console.log(`[Transcript] Manual Success with client ${clientType}. Length: ${transcriptText.length}`);
+                            break;
+                        }
+                    }
+                } catch (e: any) {
+                    console.warn(`[Transcript] Client ${clientType} failed: ${e.message}`);
+                }
             }
         }
 
-        // Strategy 4: Last resort youtube-transcript (Node)
+        // Strategy 2: Python Serverless Fallback (More Resilient)
         if (!transcriptText) {
             try {
+                console.log(`[Transcript] Strategy 2: Python Serverless Fallback for ${videoId}`);
+                // Call the local python function via the internal Vercel URL or the public one
+                // Since this is during execution on Vercel, we can try to fetch the absolute URL
+                const protocol = req.headers.get("x-forwarded-proto") || "http";
+                const host = req.headers.get("host") || "localhost:3000";
+                const baseUrl = `${protocol}://${host}`;
+
+                const pyRes = await fetch(`${baseUrl}/api/python/transcript?videoId=${videoId}`);
+                if (pyRes.ok) {
+                    const pyData = await pyRes.json();
+                    if (pyData.transcript) {
+                        transcriptText = pyData.transcript;
+                        console.log(`[Transcript] Strategy 2 Success. Length: ${transcriptText.length}`);
+                    }
+                } else {
+                    const errData = await pyRes.json();
+                    console.warn(`[Transcript] Strategy 2 Fail: ${errData.error}`);
+                }
+            } catch (e: any) {
+                console.warn(`[Transcript] Strategy 2 Exception: ${e.message}`);
+            }
+        }
+
+        // Strategy 3: youtube-transcript library (Quick Catch-all)
+        if (!transcriptText) {
+            try {
+                console.log(`[Transcript] Strategy 3: youtube-transcript for ${videoId}`);
+                const { YoutubeTranscript } = await import('youtube-transcript');
                 const transcript = await YoutubeTranscript.fetchTranscript(videoId);
                 transcriptText = transcript.map(t => t.text).join(" ");
-                console.log(`[Transcript] Node fallback success.`);
-            } catch (nodeError: any) {
-                console.error("[Transcript] All methods failed.");
+                if (transcriptText.length > 100) {
+                    console.log(`[Transcript] Strategy 3 success. Length: ${transcriptText.length}`);
+                }
+            } catch (e: any) {
+                console.warn(`[Transcript] Strategy 3 failed: ${e.message}`);
+            }
+        }
 
-                const isNoCaptions = nodeError.message?.includes("Transcripts are disabled") || nodeError.message?.includes("No transcript found");
-                const errorMessage = isNoCaptions
-                    ? "This video does not have captions/transcripts available. Please try a different video."
-                    : "Could not fetch transcript. The video might be restricted.";
+        // Strategy 3: Manual Regex Scraper (Last Resort)
+        if (!transcriptText) {
+            try {
+                console.log(`[Transcript] Strategy 3: Manual Regex Scraper for ${videoId}`);
+                const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                        'Accept-Language': 'en-US,en;q=0.0',
+                        'Referer': 'https://www.google.com/',
+                        'Cookie': 'CONSENT=YES+cb.20210328-17-p0.en+FX+417;'
+                    }
+                });
+                const html = await response.text();
+                const jsonMatch = html.match(/ytInitialPlayerResponse\s*=\s*({.+?});/);
+                if (jsonMatch) {
+                    const playerResponse = JSON.parse(jsonMatch[1]);
+                    const tracks = playerResponse.captions?.playerCaptionsTracklistRenderer?.captionTracks;
+                    if (tracks && tracks.length > 0) {
+                        const enTrack = tracks.find((t: any) => t.languageCode === 'en' || t.vssId?.includes('en')) || tracks[0];
+                        const trackUrl = enTrack.baseUrl + (enTrack.baseUrl.includes('?') ? '&' : '?') + 'fmt=srv1';
+                        const transcriptRes = await fetch(trackUrl);
+                        const xml = await transcriptRes.text();
+                        const segments = xml.match(/<text\s+[^>]*>([^<]*)<\/text>/g) || [];
+                        transcriptText = segments
+                            .map(s => s.replace(/<text\s+[^>]*>/, '').replace('</text>', ''))
+                            .map(s => s.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"'))
+                            .join(' ');
 
-                return NextResponse.json({ error: errorMessage }, { status: 404 });
+                        if (transcriptText.length > 100) {
+                            console.log(`[Transcript] Strategy 3 success. Length: ${transcriptText.length}`);
+                        }
+                    }
+                }
+            } catch (e: any) {
+                console.warn(`[Transcript] Strategy 3 failed: ${e.message}`);
             }
         }
 
         if (!transcriptText || transcriptText.length < 50) {
-            return NextResponse.json({ error: "Could not fetch transcript. The video might be restricted, private, or lack captions." }, { status: 404 });
+            return NextResponse.json({
+                error: "COULD_NOT_FETCH_TRANSCRIPT",
+                message: "We couldn't fetch the transcript automatically. YouTube might be blocking the request. You can try pasting the transcript manually below."
+            }, { status: 404 });
         }
 
         // Initialize Gemini
@@ -137,20 +167,57 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Server Error: GEMINI_API_KEY is not set." }, { status: 500 });
         }
 
+        // Try to fetch video metadata for context
+        let videoTitle = "Unknown Video";
+        let channelName = "Unknown Channel";
+        try {
+            const oembedUrl = `https://www.youtube.com/oembed?url=${url}&format=json`;
+            const metadataRes = await fetch(oembedUrl);
+            if (metadataRes.ok) {
+                const metadata = await metadataRes.json();
+                videoTitle = metadata.title || "Unknown Video";
+                channelName = metadata.author_name || "Unknown Channel";
+            }
+        } catch (error) {
+            console.warn("Failed to fetch video metadata:", error);
+        }
+
         const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        // Switching to gemini-flash-latest (Verified working for this key)
+        const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
         const prompt = `
     You are an expert AI tutor.
-    Here is the transcript of a YouTube video:
-    "${transcriptText.slice(0, 25000)}" 
-    (Note: Transcript might be truncated if too long)
-
-    Please provide:
-    1. A concise **Summary** of the video content.
-    2. Detailed **Study Notes** with bullet points, capturing key concepts and definitions.
+    Task: Summarize the video and generate clean study notes based on the provided transcript.
     
-    Format the output in Markdown.
+    Video Context:
+    - Title: ${videoTitle}
+    - Channel: ${channelName}
+    - URL: ${url}
+    
+    Transcript:
+    "${transcriptText.slice(0, 25000)}" 
+
+    Please provide the response in the following Markdown format ONLY (do not add introductory text like "Here is the summary"):
+    
+    # [Video Title] 
+    
+    ## 1. Summary
+    [Concise summary of the video content]
+    
+    ## 2. Detailed Study Notes
+    
+    ### Content Overview
+    - [Bullet point 1]
+    - [Bullet point 2]
+    - ...
+    
+    ### Key Concepts
+    - [Concept 1]
+    - [Concept 2]
+    
+    ## 3. Context & Analysis
+    [Brief explanation of the context]
     `;
 
         const result = await model.generateContent(prompt);
@@ -161,11 +228,6 @@ export async function POST(req: NextRequest) {
 
     } catch (error: any) {
         console.error("API Error:", error);
-
-        if (error.status === 429 || error.message?.includes("429")) {
-            return NextResponse.json({ error: "AI Limit Reached: Please wait a moment and try again." }, { status: 429 });
-        }
-
         return NextResponse.json({ error: error.message || "Internal Server Error" }, { status: 500 });
     }
 }

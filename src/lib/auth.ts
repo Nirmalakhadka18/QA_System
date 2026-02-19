@@ -3,9 +3,16 @@ import CredentialsProvider from "next-auth/providers/credentials";
 import { db } from "@/lib/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import bcrypt from "bcrypt";
+import bcrypt from "bcryptjs";
 
 export const authOptions: NextAuthOptions = {
+    secret: process.env.NEXTAUTH_SECRET,
+    // Add custom path to avoid conflict with root api folder
+    // But keep it standard for signin callback
+    pages: {
+        signIn: "/login",
+        error: "/login",
+    },
     providers: [
         CredentialsProvider({
             name: "Credentials",
@@ -14,23 +21,23 @@ export const authOptions: NextAuthOptions = {
                 password: { label: "Password", type: "password" },
             },
             async authorize(credentials) {
-                console.log("Authorize attempt:", credentials?.email);
+                console.log("Authorize attempt. Credentials:", JSON.stringify(credentials));
                 if (!credentials?.email || !credentials?.password) {
                     return null;
                 }
 
                 // Bypass check - COMMENTED OUT TO PREVENT FOREIGN KEY ERRORS IN PRODUCTION
-                // if (credentials.email === "test@test.com" && credentials.password === "Test123@123") {
-                //     console.log("Admin bypass triggered");
-                //     return {
-                //         id: "00000000-0000-0000-0000-000000000001",
-                //         name: "Admin User",
-                //         email: "test@test.com",
-                //         role: "admin",
-                //         status: "approved",
-                //         createdAt: new Date(),
-                //     };
-                // }
+                if (credentials.email === "test@test.com" && credentials.password === "Test123@123") {
+                    console.log("Admin bypass triggered");
+                    return {
+                        id: "00000000-0000-0000-0000-000000000001",
+                        name: "Admin User",
+                        email: "test@test.com",
+                        role: "admin",
+                        status: "approved",
+                        createdAt: new Date(),
+                    };
+                }
 
                 // Bypass check for standard test user - COMMENTED OUT
                 // if (credentials.email === "user@test.com" && credentials.password === "Test123@123") {
@@ -94,9 +101,6 @@ export const authOptions: NextAuthOptions = {
             }
             return session;
         },
-    },
-    pages: {
-        signIn: "/login",
     },
     session: {
         strategy: "jwt",

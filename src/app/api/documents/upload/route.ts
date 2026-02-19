@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
         if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
             try {
                 // Using dynamic import for the internal lib to bypass buggy index
+                // @ts-ignore
                 const pdfParser = (await import("pdf-parse/lib/pdf-parse.js")).default;
                 const data = await pdfParser(buffer);
                 extractedText = data.text;
@@ -48,8 +49,11 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Unsupported file type" }, { status: 400 });
         }
 
+        const workspaceId = formData.get("workspaceId") as string;
+
         const [document] = await db.insert(documents).values({
             userId: (session.user as any).id,
+            workspaceId: workspaceId || null,
             name: file.name,
             type: type,
             content: extractedText,

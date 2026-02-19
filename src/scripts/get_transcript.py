@@ -4,8 +4,10 @@ from youtube_transcript_api import YouTubeTranscriptApi
 
 def get_transcript(video_id):
     try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
-        transcript_text = " ".join([i['text'] for i in transcript_list])
+        # Validated API for installed version 1.2.4
+        transcript = YouTubeTranscriptApi().fetch(video_id)
+        # Transcript object is iterable yielding snippets with .text attribute
+        transcript_text = " ".join([snippet.text for snippet in transcript])
         print(json.dumps({"transcript": transcript_text}))
     except Exception as e:
         print(json.dumps({"error": str(e)}))

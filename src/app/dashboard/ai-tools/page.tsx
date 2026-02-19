@@ -7,23 +7,54 @@ import Link from "next/link";
 
 export default function AIStudyTool() {
     const [url, setUrl] = useState("");
+    const [manualTranscript, setManualTranscript] = useState("");
+    const [showManualInput, setShowManualInput] = useState(false);
     const [summary, setSummary] = useState("");
     const [transcript, setTranscript] = useState("");
     const [loading, setLoading] = useState(false);
+    const [statusMessage, setStatusMessage] = useState("");
     const [error, setError] = useState("");
 
-    const handleGenerate = async () => {
-        setLoading(true);
-        setError("");
-        setSummary("");
-        setTranscript("");
+    const handleGenerate = async (useManual = false, useMetadataOnly = false) => {
+        if (!useManual) {
+            setLoading(true);
+            setError("");
+            setSummary("");
+            setTranscript("");
+            setStatusMessage("Analyzing video...");
+        } else {
+            setStatusMessage(useMetadataOnly ? "Generating from metadata..." : "Analyzing transcript...");
+        }
 
         try {
-            const response = await fetch("/api/ai/summarize", {
+            const endpoint = useManual ? "/api/ai/summarize/manual" : "/api/ai/summarize";
+            let body;
+            if (useManual) {
+                body = {
+                    url,
+                    transcript: manualTranscript,
+                    useMetadataOnly
+                };
+            } else {
+                body = { url };
+            }
+
+            const response = await fetch(endpoint, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ url }),
+                body: JSON.stringify(body),
             });
+
+            // Auto-Failover Logic
+            if (!useManual && response.status === 404) {
+                const data = await response.json();
+                if (data.error === "COULD_NOT_FETCH_TRANSCRIPT") {
+                    // Automatically switch to Metadata Mode
+                    setStatusMessage("Transcript blocked. Switching to Smart Metadata analysis... 🧠");
+                    await handleGenerate(true, true); // Recursive call for metadata
+                    return;
+                }
+            }
 
             const data = await response.json();
 
@@ -32,26 +63,36 @@ export default function AIStudyTool() {
             }
 
             setSummary(data.summary);
-            setTranscript(data.transcript);
+            setTranscript(data.transcript || manualTranscript);
+            // Don't auto-hide manual input if it was user-toggled, but usually we want to clear distractions
+            // setShowManualInput(false); 
         } catch (err: any) {
             setError(err.message);
         } finally {
+            if (!useManual) setLoading(false); // Only unset loading if we are the parent call or final call
+            // Actually, we should check if we are recursing.
+            // Simplified: If we are recursing, the child call will handle loading state? 
+            // No, async recursion is tricky. Let's strictly control loading.
+            // If we recursively called, we returned early, so this finally block WONT run for the first call?
+            // Wait, await handleGenerate() will finish, then this runs.
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 p-8">
+        <div className="min-h-screen p-8">
             <div className="max-w-4xl mx-auto">
                 <div className="mb-8 flex items-center justify-between">
-                    <h1 className="text-3xl font-bold text-gray-900">AI Video Summarizer 🧠</h1>
-                    <Link href="/dashboard" className="text-indigo-600 hover:text-indigo-800 font-medium">
+                    <h1 className="text-3xl font-bold text-white drop-shadow-sm flex items-center gap-2">
+                        AI Video Summarizer <span className="text-2xl">🧠</span>
+                    </h1>
+                    <Link href="/dashboard" className="text-indigo-200 hover:text-white font-medium transition-colors flex items-center gap-1">
                         ← Back to Dashboard
                     </Link>
                 </div>
 
-                <div className="bg-white rounded-2xl shadow-xl p-8 mb-8">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                <div className="bg-white/10 backdrop-blur-md rounded-2xl shadow-xl border border-white/20 p-8 mb-8">
+                    <label className="block text-sm font-medium text-indigo-100 mb-2">
                         Paste YouTube Video URL
                     </label>
                     <div className="flex gap-4">
@@ -60,21 +101,58 @@ export default function AIStudyTool() {
                             value={url}
                             onChange={(e) => setUrl(e.target.value)}
                             placeholder="https://www.youtube.com/watch?v=..."
-                            className="flex-1 rounded-lg border border-gray-300 px-4 py-3 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all text-gray-900 bg-white"
+                            className="flex-1 rounded-xl border-white/30 bg-white/20 text-white placeholder:text-indigo-200/70 focus:ring-2 focus:ring-indigo-400 focus:border-transparent px-4 py-3 outline-none transition-all"
                         />
                         <button
-                            onClick={handleGenerate}
+                            onClick={() => handleGenerate(false)}
                             disabled={loading || !url}
-                            className={`px-6 py-3 rounded-lg font-semibold text-white transition-all ${loading || !url
-                                ? "bg-gray-400 cursor-not-allowed"
-                                : "bg-indigo-600 hover:bg-indigo-700 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5"
+                            className={`px-6 py-3 rounded-xl font-semibold text-white transition-all ${loading || !url
+                                ? "bg-white/10 text-white/50 cursor-not-allowed border border-white/10"
+                                : "bg-indigo-600 hover:bg-indigo-500 shadow-lg hover:shadow-indigo-500/30 transform hover:-translate-y-0.5"
                                 }`}
                         >
-                            {loading ? "Analyzing..." : "Generate Notes"}
+                            {loading ? statusMessage || "Analyzing..." : "Generate Notes"}
                         </button>
                     </div>
+
+                    {/* Hidden/Advanced Manual Input Toggle */}
+                    <div className="mt-4 flex justify-end">
+                        <button
+                            onClick={() => setShowManualInput(!showManualInput)}
+                            className="text-xs text-indigo-300/50 hover:text-indigo-200 transition-colors"
+                        >
+                            {showManualInput ? "Hide Advanced Options" : "Trouble? Try Manual Input"}
+                        </button>
+                    </div>
+
+                    {showManualInput && (
+                        <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: "auto" }}
+                            className="mt-6 pt-6 border-t border-white/10"
+                        >
+                            <label className="block text-sm font-medium text-indigo-100 mb-2">
+                                Paste Transcript Manually
+                            </label>
+                            <textarea
+                                value={manualTranscript}
+                                onChange={(e) => setManualTranscript(e.target.value)}
+                                rows={6}
+                                placeholder="Paste the full transcript text here..."
+                                className="w-full rounded-xl border-white/30 bg-white/20 text-white placeholder:text-indigo-200/70 focus:ring-2 focus:ring-indigo-400 focus:border-transparent px-4 py-3 outline-none transition-all resize-none mb-4 font-mono text-sm"
+                            />
+                            <button
+                                onClick={() => handleGenerate(true)}
+                                disabled={loading || !manualTranscript}
+                                className="w-full py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold transition-all shadow-lg hover:shadow-emerald-500/30 flex items-center justify-center gap-2"
+                            >
+                                {loading ? "Analyzing..." : "Summarize Manual Transcript"}
+                            </button>
+                        </motion.div>
+                    )}
+
                     {error && (
-                        <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg border border-red-200">
+                        <div className="mt-4 p-4 bg-red-500/20 text-red-200 rounded-xl border border-red-500/30">
                             {error}
                         </div>
                     )}
@@ -101,30 +179,15 @@ export default function AIStudyTool() {
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="bg-white rounded-2xl shadow-xl p-8 prose prose-indigo max-w-none"
+                        className="bg-white/10 backdrop-blur-md rounded-2xl shadow-xl border border-white/20 p-8 prose prose-invert max-w-none"
                     >
-                        <h2 className="text-2xl font-bold mb-6 text-gray-800 border-b pb-4">Study Notes & Summary</h2>
-                        <div className="whitespace-pre-wrap text-gray-700 leading-relaxed font-sans">
-                            {summary}
+                        <h2 className="text-2xl font-bold mb-6 text-white border-b border-white/20 pb-4">Study Notes & Summary</h2>
+                        <div className="text-indigo-100 leading-relaxed">
+                            <ReactMarkdown>{summary}</ReactMarkdown>
                         </div>
                     </motion.div>
                 )}
 
-                {transcript && (
-                    <div className="mt-8 bg-white rounded-2xl shadow-xl p-8">
-                        <details className="group">
-                            <summary className="flex justify-between items-center font-medium cursor-pointer list-none">
-                                <span className="text-xl font-bold text-gray-800">Video Transcript</span>
-                                <span className="transition group-open:rotate-180">
-                                    <svg fill="none" height="24" shapeRendering="geometricPrecision" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" viewBox="0 0 24 24" width="24"><path d="M6 9l6 6 6-6"></path></svg>
-                                </span>
-                            </summary>
-                            <div className="text-gray-600 mt-4 h-64 overflow-y-auto whitespace-pre-wrap text-sm border-t pt-4 leading-relaxed">
-                                {transcript}
-                            </div>
-                        </details>
-                    </div>
-                )}
             </div>
         </div>
     );

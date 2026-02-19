@@ -99,8 +99,8 @@ export default function AdminDashboard({
                                 </td>
                                 <td className="p-4">
                                     <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${user.status === 'approved'
-                                            ? 'bg-green-900/20 text-green-400 border-green-800'
-                                            : 'bg-yellow-900/20 text-yellow-400 border-yellow-800'
+                                        ? 'bg-green-900/20 text-green-400 border-green-800'
+                                        : 'bg-yellow-900/20 text-yellow-400 border-yellow-800'
                                         }`}>
                                         {user.status === 'approved' ? 'Approved' : 'Pending'}
                                     </span>
